@@ -324,6 +324,25 @@ async def tool_calculate_purchase_needs(production_plan: dict) -> str:
     }, ensure_ascii=False)
 
 
+
+async def tool_ms_query(endpoint: str, params: dict = None, method: str = "GET", body: dict = None) -> str:
+    """Universal MoySklad API query - any endpoint, any params."""
+    try:
+        url = f"{MS_BASE}{endpoint}" if endpoint.startswith("/") else endpoint
+        logger.info(f"ms_query {method} {endpoint} params={params}")
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.request(method.upper(), url, headers=MS_HEADERS, params=params or {}, json=body)
+            r.raise_for_status()
+            data = r.json()
+        if isinstance(data, dict) and "rows" in data:
+            rows = data["rows"]
+            return json.dumps({"total": data.get("meta", {}).get("size", len(rows)), "rows": rows}, ensure_ascii=False, default=str)
+        return json.dumps(data, ensure_ascii=False, default=str)
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"HTTP {e.response.status_code}: {e.response.text[:500]}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 TOOL_MAP = {
     "get_stock": tool_get_stock,
     "get_sales": tool_get_sales,
@@ -332,6 +351,7 @@ TOOL_MAP = {
     "get_cashflow": tool_get_cashflow,
     "get_processing_plans": tool_get_processing_plans,
     "calculate_purchase_needs": tool_calculate_purchase_needs,
+    "ms_query": tool_ms_query,
 }
 
 
