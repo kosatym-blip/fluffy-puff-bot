@@ -353,7 +353,7 @@ SYSTEM_PROMPT = """Ты — AI-ассистент компании Fluffy Puff, 
 
 async def run_claude_agent(user_id: int, user_message: str) -> str:
     """Запускает Claude сы инструментами, возвращает финальный ответ."""
-    history = user_historieq.setdefault(user_id, [])
+    history = user_histories.setdefault(user_id, [])
     history.append({"role": "user", "content": user_message})
 
     # Ограничиваем историю последним 20 сообщениями
