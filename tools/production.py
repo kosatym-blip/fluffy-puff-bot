@@ -20,12 +20,23 @@ PRODUCTION_TOOLS = [
     },
     {
         "name": "get_processing_history",
-        "description": "История производственных операций за период.",
+        "description": "История производственных операций за период (старый формат /entity/processing).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "days": {"type": "integer", "default": 30},
                 "limit": {"type": "integer", "default": 50},
+            },
+        },
+    },
+    {
+        "name": "get_stage_completions",
+        "description": "Выполнения этапов производства за период. Используй для ответов на вопросы 'что произведено', 'производство за день/неделю'. Это основной инструмент учёта производства.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "default": 7, "description": "За сколько дней смотреть"},
+                "limit": {"type": "integer", "default": 100},
             },
         },
     },
@@ -99,6 +110,62 @@ async def tool_calculate_purchase_needs(production_plan: dict) -> str:
     }, ensure_ascii=False)
 
 
+async def tool_get_stage_completions(days=7, limit=100) -> str:
+    dt_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    data = await ms_get("/entity/productionstagecompletion", {
+        "filter": f"moment>{dt_from}",
+        "order": "moment,desc",
+        "limit": limit,
+        "expand": "processingStage,processingOrder,products.assortment",
+    })
+    rows = data.get("rows", [])
+
+    # Aggregate totals by product name from output products
+    totals: dict[str, float] = {}
+    items = []
+    for r in rows:
+        moment = r.get("moment", "")
+        stage = r.get("processingStage", {}).get("name", "?")
+        order_name = r.get("processingOrder", {}).get("name", "?")
+        products = r.get("products", {}).get("rows", [])
+
+        if products:
+            for p in products:
+                product_name = p.get("assortment", {}).get("name", "?")
+                qty = p.get("quantity", 0)
+                totals[product_name] = totals.get(product_name, 0) + qty
+                items.append({
+                    "date": moment[:10],
+                    "time": moment[11:16],
+                    "stage": stage,
+                    "order": order_name,
+                    "product": product_name,
+                    "quantity": qty,
+                })
+        else:
+            # Fallback: top-level quantity + order name
+            qty = r.get("quantity", 0)
+            totals[order_name] = totals.get(order_name, 0) + qty
+            items.append({
+                "date": moment[:10],
+                "time": moment[11:16],
+                "stage": stage,
+                "order": order_name,
+                "product": order_name,
+                "quantity": qty,
+            })
+
+    result = {
+        "period_days": days,
+        "completions_count": len(rows),
+        "totals_by_product": [
+            {"name": k, "quantity": v} for k, v in sorted(totals.items(), key=lambda x: -x[1])
+        ],
+        "items": items,
+    }
+    return json.dumps(result, ensure_ascii=False)
+
+
 async def tool_get_processing_history(days=30, limit=50) -> str:
     dt_from = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     data = await ms_get("/entity/processing", {
@@ -128,5 +195,6 @@ async def tool_get_processing_history(days=30, limit=50) -> str:
 PRODUCTION_TOOL_MAP = {
     "get_processing_plans": tool_get_processing_plans,
     "get_processing_history": tool_get_processing_history,
+    "get_stage_completions": tool_get_stage_completions,
     "calculate_purchase_needs": tool_calculate_purchase_needs,
 }

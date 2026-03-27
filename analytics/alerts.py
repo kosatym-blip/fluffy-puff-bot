@@ -198,27 +198,40 @@ async def check_declining_clients() -> str | None:
 
 
 async def get_production_digest() -> str:
-    """Дайджест: что произвели за сегодня."""
+    """Дайджест: что произвели за сегодня (по выполнениям этапов)."""
     today = datetime.now().strftime("%Y-%m-%d")
     dt_from = f"{today} 00:00:00"
 
-    data = await ms_get("/entity/processing", {
+    data = await ms_get("/entity/productionstagecompletion", {
         "filter": f"moment>{dt_from}",
-        "expand": "processingPlan",
-        "limit": 100,
+        "expand": "processingOrder,products.assortment",
+        "limit": 200,
     })
     rows = data.get("rows", [])
 
     if not rows:
-        return f"📊 **Производство за {today}**\n\nОпераций не зафиксировано."
+        return f"📊 **Производство за {today}**\n\nВыполнений этапов не зафиксировано."
+
+    # Aggregate by product name from output products
+    totals: dict[str, float] = {}
+    for r in rows:
+        products = r.get("products", {}).get("rows", [])
+        if products:
+            for p in products:
+                product_name = p.get("assortment", {}).get("name", "?")
+                qty = p.get("quantity", 0)
+                totals[product_name] = totals.get(product_name, 0) + qty
+        else:
+            # Fallback: top-level quantity + order name
+            qty = r.get("quantity", 0)
+            name = r.get("processingOrder", {}).get("name", "?")
+            totals[name] = totals.get(name, 0) + qty
 
     lines = [f"📊 **Производство за {today}**\n"]
-    total_qty = 0
-    for r in rows:
-        plan_name = r.get("processingPlan", {}).get("name", "?")
-        qty = r.get("quantity", 0)
-        total_qty += qty
-        lines.append(f"• {plan_name}: **{qty}** шт")
+    total_units = 0
+    for name, qty in sorted(totals.items(), key=lambda x: -x[1]):
+        lines.append(f"• {name}: **{qty:.0f}** шт")
+        total_units += qty
 
-    lines.append(f"\nИтого: **{total_qty}** единиц, **{len(rows)}** операций")
+    lines.append(f"\nИтого: **{total_units:.0f}** шт, **{len(rows)}** выполнений")
     return "\n".join(lines)
