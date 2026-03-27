@@ -45,7 +45,7 @@ def store_filter(warehouse_id: str) -> str:
     return f"store={MS_BASE}/entity/store/{warehouse_id}"
 
 # ─── Claude agent settings ───────────────────────────────────────────────────
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 CLAUDE_MAX_TOKENS = 4096
 MAX_TOOL_ITERATIONS = 10
 MAX_HISTORY_MESSAGES = 10  # only user+assistant text pairs, no tool iterations
