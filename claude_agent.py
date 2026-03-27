@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 
-from anthropic import AsyncAnthropic, RateLimitError
+from anthropic import AsyncAnthropic, RateLimitError, APIStatusError
 
 from config import ANTHROPIC_KEY, CLAUDE_MODEL, CLAUDE_MAX_TOKENS, MAX_TOOL_ITERATIONS, MAX_HISTORY_MESSAGES
 from system_prompt import get_system_prompt
@@ -48,8 +48,8 @@ def _get_cached_tools():
     return cached
 
 
-async def _call_claude(messages: list, retries: int = 2) -> object:
-    """Вызов Claude API с retry при 429 и prompt caching."""
+async def _call_claude(messages: list, retries: int = 3) -> object:
+    """Вызов Claude API с retry при 429/529 и prompt caching."""
     for attempt in range(retries + 1):
         try:
             return await anthropic.messages.create(
@@ -61,8 +61,15 @@ async def _call_claude(messages: list, retries: int = 2) -> object:
             )
         except RateLimitError:
             if attempt < retries:
-                wait = 15 * (attempt + 1)  # 15s, 30s
+                wait = 15 * (attempt + 1)
                 logger.warning(f"Rate limit 429, waiting {wait}s (attempt {attempt + 1})")
+                await asyncio.sleep(wait)
+            else:
+                raise
+        except APIStatusError as e:
+            if e.status_code == 529 and attempt < retries:
+                wait = 10 * (attempt + 1)
+                logger.warning(f"Overloaded 529, waiting {wait}s (attempt {attempt + 1})")
                 await asyncio.sleep(wait)
             else:
                 raise
@@ -149,6 +156,11 @@ async def run_claude_agent(user_id: int, user_message: str) -> str:
     except RateLimitError:
         logger.error(f"Rate limit exceeded for user {user_id} after retries")
         return "⚠️ Превышен лимит запросов к API. Подожди минуту и попробуй снова."
+    except APIStatusError as e:
+        if e.status_code == 529:
+            logger.error(f"API overloaded for user {user_id} after retries")
+            return "⚠️ Серверы Claude перегружены. Подожди 30 секунд и попробуй снова."
+        raise
 
 
 def clear_history(user_id: int):
